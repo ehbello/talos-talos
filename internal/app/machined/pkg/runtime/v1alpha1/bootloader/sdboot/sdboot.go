@@ -6,6 +6,7 @@
 package sdboot
 
 import (
+	"bytes"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 
 	"github.com/ecks/uefi/efi/efivario"
 	"github.com/siderolabs/gen/xerrors"
@@ -31,10 +33,10 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/constants"
 )
 
-// LoaderConfBytes is the content of the loader.conf file.
+// LoaderConfTmpl is the content of the loader.conf.tmpl file.
 //
-//go:embed loader.conf
-var LoaderConfBytes []byte
+//go:embed loader.conf.tmpl
+var LoaderConfTmpl string
 
 // Config describe sd-boot state.
 type Config struct {
@@ -285,13 +287,23 @@ func (c *Config) install(opts options.InstallOptions) (*options.InstallResult, e
 		return nil, fmt.Errorf("unsupported architecture: %s", opts.Arch)
 	}
 
+	var loaderConfigOut bytes.Buffer
+
+	if err := template.Must(template.New("loader.conf").Parse(LoaderConfTmpl)).Execute(&loaderConfigOut, struct {
+		SecureBootEnroll string
+	}{
+		SecureBootEnroll: opts.BootAssets.SDBootSecureBootEnrollKeys,
+	}); err != nil {
+		return nil, fmt.Errorf("error rendering loader.conf: %w", err)
+	}
+
 	if _, err := os.Stat(filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader", "loader.conf")); err != nil {
 		if os.IsNotExist(err) {
 			if err := os.MkdirAll(filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader"), 0o755); err != nil {
 				return nil, err
 			}
 
-			if err := os.WriteFile(filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader", "loader.conf"), LoaderConfBytes, 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader", "loader.conf"), loaderConfigOut.Bytes(), 0o644); err != nil {
 				return nil, err
 			}
 		} else {
@@ -321,6 +333,64 @@ func (c *Config) install(opts options.InstallOptions) (*options.InstallResult, e
 		opts.Printf("removing old UKI: %s", file)
 
 		if err = os.Remove(file); err != nil {
+			return nil, err
+		}
+	}
+
+	if opts.BootAssets.UKISigningCertDerPath != "" {
+		if err := os.MkdirAll(filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "EFI/keys"), 0o755); err != nil {
+			return nil, err
+		}
+
+		if err := utils.CopyFiles(
+			opts.Printf,
+			utils.SourceDestination(
+				opts.BootAssets.UKISigningCertDerPath,
+				filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "EFI/keys/uki-signing-cert.der"),
+			),
+		); err != nil {
+			return nil, err
+		}
+	}
+
+	if opts.BootAssets.PlatformKeyPath != "" || opts.BootAssets.KeyExchangeKeyPath != "" || opts.BootAssets.SignatureKeyPath != "" {
+		if err := os.MkdirAll(filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader/keys/auto"), 0o755); err != nil {
+			return nil, err
+		}
+	}
+
+	if opts.BootAssets.PlatformKeyPath != "" {
+		if err := utils.CopyFiles(
+			opts.Printf,
+			utils.SourceDestination(
+				opts.BootAssets.PlatformKeyPath,
+				filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader/keys/auto", constants.PlatformKeyAsset),
+			),
+		); err != nil {
+			return nil, err
+		}
+	}
+
+	if opts.BootAssets.KeyExchangeKeyPath != "" {
+		if err := utils.CopyFiles(
+			opts.Printf,
+			utils.SourceDestination(
+				opts.BootAssets.KeyExchangeKeyPath,
+				filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader/keys/auto", constants.KeyExchangeKeyAsset),
+			),
+		); err != nil {
+			return nil, err
+		}
+	}
+
+	if opts.BootAssets.SignatureKeyPath != "" {
+		if err := utils.CopyFiles(
+			opts.Printf,
+			utils.SourceDestination(
+				opts.BootAssets.SignatureKeyPath,
+				filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader/keys/auto", constants.SignatureKeyAsset),
+			),
+		); err != nil {
 			return nil, err
 		}
 	}

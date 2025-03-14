@@ -57,6 +57,17 @@ type BootAssets struct {
 	UKIPath    string
 	SDBootPath string
 
+	// A value in loader.conf secure-boot-enroll: off, manual, if-safe, force.
+	SDBootSecureBootEnrollKeys string
+
+	// UKISigningCertDer is the DER encoded UKI signing certificate.
+	UKISigningCertDerPath string
+
+	// optional, for auto-enrolling secureboot keys
+	PlatformKeyPath    string
+	KeyExchangeKeyPath string
+	SignatureKeyPath   string
+
 	DTBPath         string
 	UBootPath       string
 	RPiFirmwarePath string

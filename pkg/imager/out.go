@@ -355,6 +355,135 @@ func (i *Imager) buildImage(ctx context.Context, path string, printf func(string
 		Printf:      printf,
 	}
 
+	if i.prof.SecureBootEnabled() {
+		imageOptions := pointer.SafeDeref(i.prof.Output.ImageOptions)
+
+		var signer pesign.CertificateSigner
+
+		signer, err = i.prof.Input.SecureBoot.SecureBootSigner.GetSigner(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get SecureBoot signer: %w", err)
+		}
+
+		derCrtPath := filepath.Join(i.tempDir, "uki.der")
+
+		if err = os.WriteFile(derCrtPath, signer.Certificate().Raw, 0o600); err != nil {
+			return fmt.Errorf("failed to write uki.der: %w", err)
+		}
+
+		opts = &install.Options{
+			Disk:       loDevice.Path(),
+			Platform:   i.prof.Platform,
+			Arch:       i.prof.Arch,
+			Board:      i.prof.Board,
+			MetaValues: install.FromMeta(metaContents),
+
+			ImageSecureboot:     i.prof.SecureBootEnabled(),
+			DiskImageBootloader: i.prof.Output.ImageOptions.Bootloader.String(),
+			Version:             i.prof.Version,
+			BootAssets: options.BootAssets{
+				KernelPath:    i.prof.Input.Kernel.Path,
+				InitramfsPath: i.initramfsPath,
+				UKIPath:       i.ukiPath,
+				SDBootPath:    i.sdBootPath,
+
+				SDBootSecureBootEnrollKeys: imageOptions.SDBootEnrollKeys.String(),
+
+				UKISigningCertDerPath: derCrtPath,
+
+				PlatformKeyPath:    i.prof.Input.SecureBoot.PlatformKeyPath,
+				KeyExchangeKeyPath: i.prof.Input.SecureBoot.KeyExchangeKeyPath,
+				SignatureKeyPath:   i.prof.Input.SecureBoot.SignatureKeyPath,
+
+				DTBPath:         i.prof.Input.DTB.Path,
+				UBootPath:       i.prof.Input.UBoot.Path,
+				RPiFirmwarePath: i.prof.Input.RPiFirmware.Path,
+			},
+			MountPrefix: scratchSpace,
+			Printf:      printf,
+		}
+
+		if i.prof.Input.SecureBoot.PlatformKeyPath == "" {
+			printf("generating SecureBoot database...")
+
+			// generate the database automatically from provided values
+			enrolledPEM := pem.EncodeToMemory(&pem.Block{
+				Type:  "CERTIFICATE",
+				Bytes: signer.Certificate().Raw,
+			})
+
+			var entries []database.Entry
+
+			entries, err = database.Generate(enrolledPEM, signer, database.IncludeWellKnownCertificates(i.prof.Input.SecureBoot.IncludeWellKnownCerts))
+			if err != nil {
+				return fmt.Errorf("failed to generate database: %w", err)
+			}
+
+			for _, entry := range entries {
+				entryPath := filepath.Join(i.tempDir, entry.Name)
+
+				if err = os.WriteFile(entryPath, entry.Contents, 0o600); err != nil {
+					return err
+				}
+
+				switch entry.Name {
+				case constants.PlatformKeyAsset:
+					opts.BootAssets.PlatformKeyPath = entryPath
+				case constants.KeyExchangeKeyAsset:
+					opts.BootAssets.KeyExchangeKeyPath = entryPath
+				case constants.SignatureKeyAsset:
+					opts.BootAssets.SignatureKeyPath = entryPath
+				default:
+					return fmt.Errorf("unknown database entry: %s", entry.Name)
+				}
+			}
+		} else {
+			opts.BootAssets.PlatformKeyPath = i.prof.Input.SecureBoot.PlatformKeyPath
+			opts.BootAssets.KeyExchangeKeyPath = i.prof.Input.SecureBoot.KeyExchangeKeyPath
+			opts.BootAssets.SignatureKeyPath = i.prof.Input.SecureBoot.SignatureKeyPath
+		}
+
+		if i.prof.Input.SecureBoot.PlatformKeyPath == "" {
+			printf("generating SecureBoot database...")
+
+			// generate the database automatically from provided values
+			enrolledPEM := pem.EncodeToMemory(&pem.Block{
+				Type:  "CERTIFICATE",
+				Bytes: signer.Certificate().Raw,
+			})
+
+			var entries []database.Entry
+
+			entries, err = database.Generate(enrolledPEM, signer, database.IncludeWellKnownCertificates(i.prof.Input.SecureBoot.IncludeWellKnownCerts))
+			if err != nil {
+				return fmt.Errorf("failed to generate database: %w", err)
+			}
+
+			for _, entry := range entries {
+				entryPath := filepath.Join(i.tempDir, entry.Name)
+
+				if err = os.WriteFile(entryPath, entry.Contents, 0o600); err != nil {
+					return err
+				}
+
+				switch entry.Name {
+				case constants.PlatformKeyAsset:
+					opts.BootAssets.PlatformKeyPath = entryPath
+				case constants.KeyExchangeKeyAsset:
+					opts.BootAssets.KeyExchangeKeyPath = entryPath
+				case constants.SignatureKeyAsset:
+					opts.BootAssets.SignatureKeyPath = entryPath
+				default:
+					return fmt.Errorf("unknown database entry: %s", entry.Name)
+				}
+			}
+		} else {
+			opts.BootAssets.PlatformKeyPath = i.prof.Input.SecureBoot.PlatformKeyPath
+			opts.BootAssets.KeyExchangeKeyPath = i.prof.Input.SecureBoot.KeyExchangeKeyPath
+			opts.BootAssets.SignatureKeyPath = i.prof.Input.SecureBoot.SignatureKeyPath
+		}
+	}
+
 	if i.overlayInstaller != nil {
 		opts.OverlayInstaller = i.overlayInstaller
 		opts.ExtraOptions = i.prof.Overlay.ExtraOptions

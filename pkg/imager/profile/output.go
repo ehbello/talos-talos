@@ -44,6 +44,10 @@ type ImageOptions struct {
 	// Bootloader is the bootloader to use for the disk image.
 	// If not set, it defaults to dual-boot.
 	Bootloader DiskImageBootloader `yaml:"bootloader"`
+	// SDBootEnrollKeys is a value in loader.conf secure-boot-enroll: off, manual, if-safe, force.
+	//
+	// If not set, it defaults to if-safe.
+	SDBootEnrollKeys SDBootEnrollKeys `yaml:"sdBootEnrollKeys"`
 }
 
 // ISOOptions describes options for the 'iso' output.

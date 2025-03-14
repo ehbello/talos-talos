@@ -6,10 +6,12 @@
 package dual
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 
 	"github.com/siderolabs/go-blockdevice/v2/blkid"
 	"github.com/siderolabs/go-cmd/pkg/cmd"
@@ -175,6 +177,73 @@ func (c *Config) installSDBoot(opts options.InstallOptions) error {
 	// writing UKI by version-based filename here
 	ukiPath := fmt.Sprintf("%s-%s.efi", "Talos", opts.Version)
 
+	var loaderConfigOut bytes.Buffer
+
+	if err := template.Must(template.New("loader.conf").Parse(sdboot.LoaderConfTmpl)).Execute(&loaderConfigOut, struct {
+		SecureBootEnroll string
+	}{
+		SecureBootEnroll: opts.BootAssets.SDBootSecureBootEnrollKeys,
+	}); err != nil {
+		return fmt.Errorf("error rendering loader.conf: %w", err)
+	}
+	if opts.BootAssets.UKISigningCertDerPath != "" {
+		if err := os.MkdirAll(filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "EFI/keys"), 0o755); err != nil {
+			return err
+		}
+
+		if err := utils.CopyFiles(
+			opts.Printf,
+			utils.SourceDestination(
+				opts.BootAssets.UKISigningCertDerPath,
+				filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "EFI/keys/uki-signing-cert.der"),
+			),
+		); err != nil {
+			return err
+		}
+	}
+
+	if opts.BootAssets.PlatformKeyPath != "" || opts.BootAssets.KeyExchangeKeyPath != "" || opts.BootAssets.SignatureKeyPath != "" {
+		if err := os.MkdirAll(filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader/keys/auto"), 0o755); err != nil {
+			return err
+		}
+	}
+
+	if opts.BootAssets.PlatformKeyPath != "" {
+		if err := utils.CopyFiles(
+			opts.Printf,
+			utils.SourceDestination(
+				opts.BootAssets.PlatformKeyPath,
+				filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader/keys/auto", constants.PlatformKeyAsset),
+			),
+		); err != nil {
+			return err
+		}
+	}
+
+	if opts.BootAssets.KeyExchangeKeyPath != "" {
+		if err := utils.CopyFiles(
+			opts.Printf,
+			utils.SourceDestination(
+				opts.BootAssets.KeyExchangeKeyPath,
+				filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader/keys/auto", constants.KeyExchangeKeyAsset),
+			),
+		); err != nil {
+			return err
+		}
+	}
+
+	if opts.BootAssets.SignatureKeyPath != "" {
+		if err := utils.CopyFiles(
+			opts.Printf,
+			utils.SourceDestination(
+				opts.BootAssets.SignatureKeyPath,
+				filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader/keys/auto", constants.SignatureKeyAsset),
+			),
+		); err != nil {
+			return err
+		}
+	}
+
 	if err := utils.CopyFiles(
 		opts.Printf,
 		utils.SourceDestination(
@@ -193,7 +262,7 @@ func (c *Config) installSDBoot(opts options.InstallOptions) error {
 		return err
 	}
 
-	if err := os.WriteFile(filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader", "loader.conf"), sdboot.LoaderConfBytes, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(opts.MountPrefix, constants.EFIMountPoint, "loader", "loader.conf"), loaderConfigOut.Bytes(), 0o644); err != nil {
 		return err
 	}
 
